@@ -1,4 +1,4 @@
-#define MEDIUM_NUMBER 2
+#define MEDIUM_NUMBER 3
 #define T 5
 #define PROCESS_NUMBER 4
 #define SLEEP_BEFORE_ENTER 2
@@ -31,6 +31,7 @@ std::vector<int> delay_buffer;
 MPI_Status status;
 pthread_mutex_t lock;
 pthread_mutex_t clock_lock;
+pthread_mutex_t release_lock;
 
 void sendReq() {
 	pthread_mutex_lock(&clock_lock);
@@ -59,11 +60,12 @@ void *RecvMsg(void *arg) {
 		switch(status.MPI_TAG) {
 			case MSG_REQ: {
 				int medium_id = msg_recv[1];
-				//lock
+				pthread_mutex_lock(&release_lock);
 				if(medium_id != medium_req) {
-					printf("%c[%dmUbiega sie o inne medium\n", 0x1B, 0);
+					printf("%c[%dmTurysta %d ubiega sie o inne medium niz turysta %d\n", 0x1B, 0, rank, sender_id);
 					MPI_Send(msg_recv, MSG_PERMISSION_SIZE, MPI_INT, sender_id, MSG_PERMISSION, MPI_COMM_WORLD);
 				} else {
+					pthread_mutex_lock(&clock_lock);
 					if(sender_clock < req_clock || (sender_clock == req_clock && sender_id < rank)) {
 						printf("%c[%dmTurysta %d wsyla zgode turyscie %d na wejscie do medium %d\n", 0x1B, PINK, rank, sender_id, medium_id);
 						MPI_Send(msg_recv, MSG_PERMISSION_SIZE, MPI_INT, sender_id, MSG_PERMISSION, MPI_COMM_WORLD);
@@ -72,9 +74,12 @@ void *RecvMsg(void *arg) {
 						delay_buffer.push_back(sender_id);
 					}
 				}
+				pthread_mutex_unlock(&clock_lock);
+				pthread_mutex_unlock(&release_lock);
 				break;
 			}
 			case MSG_PERMISSION: {
+				printf("%c[%dmTurysta %d daje zgode turyscie %d\n", 0x1B, GREEN, rank, sender_id);
 				ack_counter--;
 				if(ack_counter == 0) {
 					pthread_mutex_unlock(&lock);
@@ -83,6 +88,18 @@ void *RecvMsg(void *arg) {
 			}
 		}
 	}
+}
+
+void sendDelayAck() {
+	pthread_mutex_lock(&clock_lock);
+	my_clock++;
+	pthread_mutex_unlock(&clock_lock);
+	msg_send[0] = my_clock;
+	for(int i = 0; i < delay_buffer.size(); ++i) {
+		printf("%c[%dmTurysta %d wysyla zgode turyscie %d z bufora\n", 0x1B, YELLOW, rank, delay_buffer[i]);
+		MPI_Send(msg_send, MSG_PERMISSION_SIZE, MPI_INT, delay_buffer[i], MSG_PERMISSION, MPI_COMM_WORLD);
+	}
+	delay_buffer.clear();
 }
 
 int main(int argc, char **argv) {
@@ -95,6 +112,7 @@ int main(int argc, char **argv) {
 
 	srand(time(NULL));
 
+	pthread_mutex_unlock(&lock);
 	while(true) {
 		medium_req = rand() % MEDIUM_NUMBER;
 		printf("%c[%dmTurysta %d z zegarem %d chce uzyskac dostep do medium %d\n", 0x1B, RED, rank, my_clock, medium_req);
@@ -104,6 +122,10 @@ int main(int argc, char **argv) {
 		pthread_mutex_lock(&lock);
 		printf("%c[%dmTurysta %d z zegarem %d wchodzi to tunelu %d\n", 0x1B, 0, rank, my_clock, medium_req);
 		sleep(SLEEP_TIME);
+		pthread_mutex_unlock(&lock);
+		pthread_mutex_lock(&release_lock);
+		sendDelayAck();
+		pthread_mutex_unlock(&release_lock);
 		medium_req = -1;
 		ack_counter = PROCESS_NUMBER - 1;
 	}
