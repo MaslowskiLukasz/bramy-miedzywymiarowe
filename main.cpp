@@ -14,6 +14,7 @@
 #include <time.h> 
 #include <unistd.h>
 #include <pthread.h>
+#include "colors.h"
 
 int rank, world_size;
 int medium_req = -1;
@@ -37,7 +38,7 @@ void sendReq() {
 	for(int i = 0; i < world_size; i++) {
 		if(i != rank) {
 			MPI_Send(msg_send, MSG_REQ_SIZE, MPI_INT, i, MSG_REQ, MPI_COMM_WORLD);
-			printf("Turysta %d wysyła zapytanie do turysty %d o wejscie do medium %d\n", rank, i, medium_req);
+			printf("%c[%dmTurysta %d wysyła zapytanie do turysty %d o wejscie do medium %d\n", 0x1B, CYAN, rank, i, medium_req);
 		}
 	}
 }
@@ -47,7 +48,7 @@ void *RecvMsg(void *arg) {
 		MPI_Recv(msg_recv, MSG_MAX_SIZE, MPI_INT, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
 		int sender_clock = msg_recv[0];
 		int sender_id = status.MPI_SOURCE;
-		printf("%d otrzymal wiadomosc od %d z zegarem %d\n", rank, sender_id, sender_clock);
+		printf("%c[%dmTurysta %d otrzymal wiadomosc od %d z zegarem %d\n", 0x1B, GREEN, rank, sender_id, sender_clock);
 	}
 
 	}
@@ -64,7 +65,7 @@ int main(int argc, char **argv) {
 
 	while(true) {
 		medium_req = rand() % MEDIUM_NUMBER;
-		printf("Turysta %d z zegarem %d chce uzyskac dostep do medium %d\n", rank, my_clock, medium_req);
+		printf("%c[%dmTurysta %d z zegarem %d chce uzyskac dostep do medium %d\n", 0x1B, RED, rank, my_clock, medium_req);
 		sleep(SLEEP_BEFORE_ENTER);
 		sendReq();
 	}
