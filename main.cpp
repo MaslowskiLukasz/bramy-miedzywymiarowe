@@ -8,7 +8,6 @@
 #define MSG_REQ_SIZE 2
 #define MSG_PERMISSION_SIZE 2
 #define MSG_REQ 1
-#define MSG_RELEASE 2
 #define MSG_PERMISSION 3
 
 #include <mpi.h>
@@ -65,7 +64,6 @@ void *RecvMsg(void *arg) {
 					printf("%c[%dmTurysta %d ubiega sie o inne medium niz turysta %d\n", 0x1B, 0, rank, sender_id);
 					MPI_Send(msg_recv, MSG_PERMISSION_SIZE, MPI_INT, sender_id, MSG_PERMISSION, MPI_COMM_WORLD);
 				} else {
-					pthread_mutex_lock(&clock_lock);
 					if(sender_clock < req_clock || (sender_clock == req_clock && sender_id < rank)) {
 						printf("%c[%dmTurysta %d wsyla zgode turyscie %d na wejscie do medium %d\n", 0x1B, PINK, rank, sender_id, medium_id);
 						MPI_Send(msg_recv, MSG_PERMISSION_SIZE, MPI_INT, sender_id, MSG_PERMISSION, MPI_COMM_WORLD);
@@ -74,7 +72,6 @@ void *RecvMsg(void *arg) {
 						delay_buffer.push_back(sender_id);
 					}
 				}
-				pthread_mutex_unlock(&clock_lock);
 				pthread_mutex_unlock(&release_lock);
 				break;
 			}
@@ -91,13 +88,11 @@ void *RecvMsg(void *arg) {
 }
 
 void sendDelayAck() {
-	pthread_mutex_lock(&clock_lock);
-	my_clock++;
-	pthread_mutex_unlock(&clock_lock);
 	msg_send[0] = my_clock;
+	msg_send[1] = medium_req;
 	for(int i = 0; i < delay_buffer.size(); ++i) {
-		printf("%c[%dmTurysta %d wysyla zgode turyscie %d z bufora\n", 0x1B, YELLOW, rank, delay_buffer[i]);
 		MPI_Send(msg_send, MSG_PERMISSION_SIZE, MPI_INT, delay_buffer[i], MSG_PERMISSION, MPI_COMM_WORLD);
+		printf("%c[%dmTurysta %d wysyla zgode turyscie %d z bufora\n", 0x1B, YELLOW, rank, delay_buffer[i]);
 	}
 	delay_buffer.clear();
 }
@@ -116,7 +111,6 @@ int main(int argc, char **argv) {
 	while(true) {
 		medium_req = rand() % MEDIUM_NUMBER;
 		printf("%c[%dmTurysta %d z zegarem %d chce uzyskac dostep do medium %d\n", 0x1B, RED, rank, my_clock, medium_req);
-		sleep(SLEEP_BEFORE_ENTER);
 		pthread_mutex_lock(&lock);
 		sendReq();
 		pthread_mutex_lock(&lock);
@@ -125,9 +119,9 @@ int main(int argc, char **argv) {
 		pthread_mutex_unlock(&lock);
 		pthread_mutex_lock(&release_lock);
 		sendDelayAck();
-		pthread_mutex_unlock(&release_lock);
 		medium_req = -1;
 		ack_counter = PROCESS_NUMBER - 1;
+		pthread_mutex_unlock(&release_lock);
 	}
 
 	errno = pthread_join(thread_id, NULL);
