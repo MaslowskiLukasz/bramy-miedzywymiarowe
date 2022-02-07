@@ -1,0 +1,72 @@
+W pętli nieskończonej turysta losuje numer medium do którego chce się dostać.
+Jeśli turysta chce się dostać do i-tego medium to wysyła zapytanie do wszystkich
+pozostałych turystów o pozwolenie na wejście do tunelu. Turysta dostaje zapytanie
+o dostęp do i-tego medium: jeśli sam nie ubiega się o dostęp do tego medium wysyła
+ACK ze swoim zegarem Lamporta i zmniejsza licznik pojemności danego medium
+(liczbę otwartych tuneli po otwarciu których medium musi odpoczać). Jeśli ubiega
+się o dostęp do tego samego medium to zegar Lamporta i id procesu decyduje o tym
+czy ACK jest wysyłane czy proces jest zapisywany w buforze. Gdy turysta otrzyma
+ACK od wszystkich procesów to wchodzi do sekcji krytycznej. Po wyjściu z tunelu
+turysta zmniejsza licznik pojemności danego medium. Jeśli licznik wynosi 0 to proces
+czeka z rozsyłaniem ACK do procesów zapisanych w buforze przez czas odpoczynku medium.
+Jeśli licznik jest różny od 0 wysyła ACK od razu. Licznik po zejściu do 0 jest
+resetowany do wartości T
+
+```python
+Zmienne procesu odbierajacego
+clock //zegar Lamporta
+AckCounter  //ilość ACK potrzebnych jeszcze do wejścia do sekcji krytycznej
+sentClock  //zegar Lamporta w momencie wysłania REQ na wejście do sekcji krytycznej
+mediumNo  //numer medium, do którego chcemy się dostać
+delayBuf  //bufor procesów, do którch musimy wysłać ACK po wyjściu z sekcji krytycznej
+mediumCapacity //liczba pozostałych tuneli po otawrciu których medium musi odpocząć
+
+receive
+    clock = max(clock, pckIn.clock) + 1
+    if pckIn.type == ACK
+        AckCounter--
+        if AckCounter == 0
+            allow_to_enter_critical_section
+    if pckIn.type == REQ
+        if pckIn.mediumNo != mediumNo
+            send_Ack(pckIn.mediumNo)
+        else
+            if pckIn.clock < sentClock or (pckIn.clock == sentClock and pckIn.id < id)
+                send_Ack(pckIn.mediumNo)
+            else
+                delayBuf.append(pckIn.id)
+
+send_Ack(receiverId, mediumNo)
+    clock++
+    pckOut.clock = clock
+    mediumCapacity[mediumNo]--
+    if mediumCapacity[mediumNo] == 0
+        mediumCapacity[mediumNo] = T    //Medium po otwarciu T tuneli musi odpocząć
+    send(receiverId, pckOut)
+
+send_Req(mediumNo)
+    clock++
+    sentClock = clock
+    pckOut.clock = sentClock
+    pckOut.mediumNo = mediumNo
+    send(broadcast, pckOut)
+
+send_delay_Ack
+    for receiverId in delayBuf
+        sendAck(receiverId, mediumNo)
+    clear_delay_buf
+
+main
+    while(True)
+        mediumNo = rand()
+        send_Req(mediumNo)
+        wait(allow_to_enter_critical_section)
+        sleep(tunel_opening_time)
+        enter_critical_section()
+        sleep(rand())
+        mediumCapacity[mediumNo]--
+        if mediumCapacity[mediumNo] == 0
+            sleep(medium_rest_time)
+            mediumCapacity[mediumNo] = T
+        sent_delay_Ack()
+```
