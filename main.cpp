@@ -33,19 +33,16 @@ pthread_mutex_t clock_lock;
 pthread_mutex_t release_lock;
 
 void sendReq() {
-	//printf("%c[%dmTurysta %d z zegarem %d przed mutex CLOCK_LOCK - sendReq\n", 0x1B, 0, rank, my_clock);
 	pthread_mutex_lock(&clock_lock);
-	//printf("%c[%dmTurysta %d z zegarem %d wewnatrz mutex CLOCK_LOCK - sendReq\n", 0x1B, 0, rank, my_clock);
 	my_clock++;
 	req_clock = my_clock;
 	pthread_mutex_unlock(&clock_lock);
-	//printf("%c[%dmTurysta %d z zegarem %d po mutex CLOCK_LOCK - sendReq\n", 0x1B, 0, rank, my_clock);
 	msg_send[0] = req_clock;
 	msg_send[1] = medium_req;
 	for(int i = 0; i < world_size; i++) {
 		if(i != rank) {
 			MPI_Send(msg_send, MSG_REQ_SIZE, MPI_INT, i, MSG_REQ, MPI_COMM_WORLD);
-			printf("%c[%dmTurysta %d wysyła zapytanie do turysty %d o wejscie do medium %d\n", 0x1B, CYAN, rank, i, medium_req);
+			printf("%c[%dm %d : %d wysyła zapytanie do turysty %d o wejscie do medium %d\n", 0x1B, CYAN, rank, my_clock, i, medium_req);
 		}
 	}
 }
@@ -53,41 +50,37 @@ void sendReq() {
 void *RecvMsg(void *arg) {
 	while(true) {
 		MPI_Recv(msg_recv, MSG_MAX_SIZE, MPI_INT, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
+		printf("%c[%dm %d : %d dostał wiadomosc typu: %d od %d -> msg[0]=%d, msg[1]=%d\n", 0x1B, RED, rank, my_clock, status.MPI_TAG, status.MPI_SOURCE, msg_recv[0], msg_recv[1]);
 		int sender_clock = msg_recv[0];
 		int sender_id = status.MPI_SOURCE;
-		//printf("%c[%dmTurysta %d z zegarem %d przed mutex CLOCK_LOCK - RecvMsg\n", 0x1B, 0, rank, my_clock);
 		pthread_mutex_lock(&clock_lock);
-		//printf("%c[%dmTurysta %d z zegarem %d wewnatrz mutex CLOCK_LOCK - RecvMsg\n", 0x1B, 0, rank, my_clock);
 		msg_recv[0] = my_clock;
 		my_clock = std::max(my_clock, sender_clock) + 1;
 		pthread_mutex_unlock(&clock_lock);
-		//printf("%c[%dmTurysta %d z zegarem %d po mutex CLOCK_LOCK - RecvMsg\n", 0x1B, 0, rank, my_clock);
 		switch(status.MPI_TAG) {
 			case MSG_REQ: {
-				//printf("%c[%dmTurysta %d z zegarem %d przed mutex RELEASE_LOCK - RecvMsg\n", 0x1B, 0, rank, my_clock);
-				pthread_mutex_lock(&release_lock);
-				//printf("%c[%dmTurysta %d z zegarem %d wewnatrz mutex RELEASE_LOCK - RecvMsg\n", 0x1B, 0, rank, my_clock);
 				int medium_id = msg_recv[1];
+				pthread_mutex_lock(&release_lock);
 				if(medium_id != medium_req) {
-					printf("%c[%dmTurysta %d ubiega sie o inne medium niz turysta %d\n", 0x1B, 0, rank, sender_id);
 					MPI_Send(msg_recv, MSG_PERMISSION_SIZE, MPI_INT, sender_id, MSG_PERMISSION, MPI_COMM_WORLD);
 				} else {
-					if(sender_clock < req_clock || (sender_clock == req_clock && sender_id < rank)) {
-						printf("%c[%dmTurysta %d wysyla zgode turyscie %d na wejscie do medium %d\n", 0x1B, PINK, rank, sender_id, medium_id);
+					pthread_mutex_lock(&clock_lock);
+					if((sender_clock < req_clock) || (sender_clock == req_clock && sender_id < rank)) {
 						MPI_Send(msg_recv, MSG_PERMISSION_SIZE, MPI_INT, sender_id, MSG_PERMISSION, MPI_COMM_WORLD);
 					} else {
-						printf("%c[%dmTurysta %d zapisuje turyste %d do bufora\n", 0x1B, GREEN, rank, sender_id);
 						delay_buffer.push_back(sender_id);
+						printf("%c[%dm %d : %d zapisal %d do bufora\n", 0x1B, YELLOW, rank, my_clock, sender_id);
 					}
+					pthread_mutex_unlock(&clock_lock);
 				}
 				pthread_mutex_unlock(&release_lock);
-				//printf("%c[%dmTurysta %d z zegarem %d po mutex RELEACK_LOCK - RecvMsg\n", 0x1B, 0, rank, my_clock);
 				break;
 			}
 			case MSG_PERMISSION: {
-				printf("%c[%dmTurysta %d dostal zgode od turysty %d\n", 0x1B, PINK, rank, sender_id);
+				printf("%c[%dm %d : %d dostal zgode od turysty %d -> %d / %d\n", 0x1B, PINK, rank, my_clock, sender_id, PROCESS_NUMBER - ack_counter, PROCESS_NUMBER);
 				ack_counter--;
 				if(ack_counter == 0) {
+					sleep(SLEEP_BEFORE_ENTER);
 					pthread_mutex_unlock(&lock);
 				}
 				break;
@@ -97,13 +90,12 @@ void *RecvMsg(void *arg) {
 }
 
 void sendDelayAck() {
-	msg_send[0] = my_clock;
-	msg_send[1] = medium_req;
 	for(int i = 0; i < delay_buffer.size(); ++i) {
 		MPI_Send(msg_send, MSG_PERMISSION_SIZE, MPI_INT, delay_buffer[i], MSG_PERMISSION, MPI_COMM_WORLD);
-		printf("%c[%dmTurysta %d wysyla zgode turyscie %d z bufora\n", 0x1B, YELLOW, rank, delay_buffer[i]);
+		printf("%c[%dm %d : %d wysyla opoznione ACK do %d\n", 0x1B, BLUE, rank, my_clock, delay_buffer[i]);
 	}
 	delay_buffer.clear();
+	printf("%c[%dm %d : %d czysci bufor\n", 0x1B, BLUE, rank, my_clock);
 }
 
 int main(int argc, char **argv) {
@@ -119,25 +111,25 @@ int main(int argc, char **argv) {
 	pthread_mutex_unlock(&lock);
 	while(true) {
 		medium_req = rand() % MEDIUM_NUMBER;
-		printf("%c[%dmTurysta %d z zegarem %d chce uzyskac dostep do medium %d\n", 0x1B, RED, rank, my_clock, medium_req);
-		//printf("%c[%dmTurysta %d z zegarem %d przed mutex LOCK - main\n", 0x1B, 0, rank, my_clock);
+		printf("%c[%dm %d : %d chce uzyskac dostep do medium %d\n", 0x1B, YELLOW, rank, my_clock, medium_req);
 		pthread_mutex_lock(&lock);
-		//printf("%c[%dmTurysta %d z zegarem %d wewnatrz mutex LOCK przed sendReq - main\n", 0x1B, 0, rank, my_clock);
 		sendReq();
-		//printf("%c[%dmTurysta %d z zegarem %d wewnatrz mutex LOCK po sendReq - main\n", 0x1B, 0, rank, my_clock);
+		printf("%c[%dm %d : %d czeka na dostep do medium %d\n", 0x1B, GREEN, rank, my_clock, medium_req);
 		pthread_mutex_lock(&lock);
-		printf("%c[%dmTurysta %d z zegarem %d wchodzi to tunelu %d\n", 0x1B, 0, rank, my_clock, medium_req);
+		printf("%c[%dm %d : %d wchodzi to tunelu %d\n", 0x1B, 0, rank, my_clock, medium_req);
 		sleep(SLEEP_TIME);
+		printf("%c[%dm %d : %d zwalnia tunel %d\n", 0x1B, 0, rank, my_clock, medium_req);
 		pthread_mutex_unlock(&lock);
-		//printf("%c[%dmTurysta %d z zegarem %d przed mutex RELEASE_LOCK - main\n", 0x1B, 0, rank, my_clock);
-		pthread_mutex_lock(&release_lock);
-		//printf("%c[%dmTurysta %d z zegarem %d wewnatrz mutex RELEASE_LOCK przed sendDelayAck - main\n", 0x1B, 0, rank, my_clock);
-		sendDelayAck();
+		pthread_mutex_lock(&clock_lock);
+		my_clock++;
+		msg_send[0] = my_clock;
+		pthread_mutex_unlock(&clock_lock);
+		msg_send[1] = medium_req;
 		medium_req = -1;
 		ack_counter = PROCESS_NUMBER - 1;
-		//printf("%c[%dmTurysta %d z zegarem %d wewnatz mutex RELEASE_LOCK po sendDelayAck - main\n", 0x1B, 0, rank, my_clock);
+		pthread_mutex_lock(&release_lock);
+		sendDelayAck();
 		pthread_mutex_unlock(&release_lock);
-		//printf("%c[%dmTurysta %d z zegarem %d po mutex RELEASE_LOCK - main\n", 0x1B, 0, rank, my_clock);
 	}
 
 	errno = pthread_join(thread_id, NULL);
